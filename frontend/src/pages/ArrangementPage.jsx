@@ -11,8 +11,7 @@ import { siteInfo } from '../data/mock';
 import { useSiteImages } from '../hooks/useSiteImages';
 import { useSiteText } from '../hooks/useSiteText';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import { getSlides } from '../lib/db';
 
 const DEFAULT_SLIDES = [
   'https://images.unsplash.com/photo-1533777857889-4be7c70b33f7?w=1920&q=80',
@@ -83,15 +82,18 @@ const ArrangementPage = () => {
   const intervalRef = useRef(null);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/arrangement-slides`)
-      .then(r => r.ok ? r.json() : [])
+    let cancelled = false;
+    getSlides()
       .then(data => {
-        if (Array.isArray(data) && data.length > 0) {
-          setSlides(data.map(s => `${API_URL}${s.url}`));
+        if (cancelled) return;
+        const urls = (Array.isArray(data) ? data : []).map(s => s.url).filter(Boolean);
+        if (urls.length > 0) {
+          setSlides(urls);
           setCurrent(0);
         }
       })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   const total = slides.length;

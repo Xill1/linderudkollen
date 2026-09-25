@@ -1,1 +1,0 @@
-Konvertering feilet. Bruk CSS: img { mix-blend-mode: multiply; }

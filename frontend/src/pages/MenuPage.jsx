@@ -4,8 +4,8 @@ import { defaultMenuData, defaultMenuCategories } from '../data/mock';
 import Navbar from '../components/Navbar';
 import { useSiteImages } from '../hooks/useSiteImages';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
+import { getMenu } from '../lib/db';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 const isWednesday = () => new Date().getDay() === 3;
 
 const ICON_MAP = {
@@ -43,13 +43,12 @@ export default function MenuPage() {
   );
 
   useEffect(() => {
-    fetch(`${API_URL}/api/menu`)
-      .then(r => r.json())
-      .then(data => { if (data?.items) setMenuData(data); })
-      .catch(() => {});
-    fetch(`${API_URL}/api/menu/categories`)
-      .then(r => r.json())
-      .then(cats => {
+    let cancelled = false;
+    getMenu()
+      .then(data => {
+        if (cancelled) return;
+        if (data?.items) setMenuData({ items: data.items, categories: data.categories || {} });
+        const cats = data?.categoryList;
         if (Array.isArray(cats) && cats.length) {
           const names = cats.map(c => c.name);
           setCategoryOrder(names);
@@ -60,6 +59,7 @@ export default function MenuPage() {
         }
       })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   const getCatIcon = (name, size = 'sm') => {

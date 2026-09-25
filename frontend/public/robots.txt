@@ -4,4 +4,4 @@ Disallow: /admin
 Disallow: /admin/login
 Disallow: /api/
 
-Sitemap: https://linderudkollen.no/api/sitemap.xml
+Sitemap: https://linderudkollen.no/sitemap.xml

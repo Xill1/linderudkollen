@@ -3,8 +3,8 @@ import { Calendar, ChevronDown, Newspaper, Image as ImageIcon, Users, Handshake,
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
+import { getPosts } from '../lib/db';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 const FOLD = 500;
 
 const CATEGORIES = [
@@ -47,7 +47,7 @@ function PostCard({ post, featured = false, onOpen }) {
       <article onClick={() => onOpen(post)}
         className="bg-[#faf5ee] border border-[#d8ccb4] rounded-3xl overflow-hidden shadow-sm cursor-pointer hover:shadow-md transition-shadow">
         {hasImage && (
-          <img src={`${API_URL}${post.image_url}`} alt={post.title}
+          <img src={post.image_url} alt={post.title}
             className="w-full h-72 md:h-80 object-cover" />
         )}
         {!hasImage && (
@@ -83,7 +83,7 @@ function PostCard({ post, featured = false, onOpen }) {
     <article onClick={() => onOpen(post)}
       className="bg-[#faf5ee] border border-[#d8ccb4] rounded-2xl overflow-hidden shadow-sm cursor-pointer hover:shadow-md transition-shadow">
       {hasImage && (
-        <img src={`${API_URL}${post.image_url}`} alt={post.title}
+        <img src={post.image_url} alt={post.title}
           className="w-full h-48 object-cover" />
       )}
       {!hasImage && (
@@ -136,7 +136,7 @@ function PostModal({ post, onClose }) {
           <X className="w-5 h-5" />
         </button>
         {hasImage ? (
-          <img src={`${API_URL}${post.image_url}`} alt={post.title}
+          <img src={post.image_url} alt={post.title}
             className="w-full h-56 sm:h-80 object-cover" />
         ) : (
           <div className="w-full h-32 bg-gradient-to-br from-amber-700 to-amber-900 flex items-center justify-center">
@@ -176,10 +176,11 @@ export default function BlogPage() {
   );
 
   useEffect(() => {
-    fetch(`${API_URL}/api/blog`)
-      .then(r => r.ok ? r.json() : [])
-      .then(data => { setPosts(Array.isArray(data) ? data : []); setLoading(false); })
-      .catch(() => setLoading(false));
+    let cancelled = false;
+    getPosts()
+      .then(data => { if (cancelled) return; setPosts(Array.isArray(data) ? data : []); setLoading(false); })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   // Filter all posts by the active category, then pin the newest match on top

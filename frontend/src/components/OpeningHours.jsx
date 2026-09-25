@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Facebook, Info, MapPin, CheckCircle } from 'lucide-react';
 import { siteInfo, defaultOpeningHours } from '../data/mock';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import { getOpeningHours } from '../lib/db';
 
 const getNorwegianToday = () => {
   const days = ['Søndag', 'Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag'];
@@ -14,10 +13,19 @@ const OpeningHours = () => {
   const today = getNorwegianToday();
 
   useEffect(() => {
-    fetch(`${API_URL}/api/opening-hours`)
-      .then(r => r.json())
-      .then(d => { if (d?.schedule) setData(d); })
+    let cancelled = false;
+    getOpeningHours()
+      .then(d => {
+        if (cancelled || !Array.isArray(d?.schedule) || !d.schedule.length) return;
+        setData({
+          period: d.period || defaultOpeningHours.period,
+          schedule: d.schedule,
+          notices: Array.isArray(d.notices) ? d.notices : defaultOpeningHours.notices,
+          footer_note: d.footer_note ?? defaultOpeningHours.footer_note,
+        });
+      })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   return (

@@ -12,6 +12,7 @@ import {
   Calendar, Type, History
 } from 'lucide-react';
 import { invalidateSiteTextCache } from '../hooks/useSiteText';
+import * as db from '../lib/db';
 
 const ICON_MAP = {
   coffee: Coffee, wheat: Wheat, soup: Soup, leaf: Leaf,
@@ -32,14 +33,6 @@ const ICON_OPTIONS = [
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
-const getHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('admin_token')}` });
-
-// ── Helpers ──
-function api(path, opts = {}) {
-  return fetch(`${API_URL}${path}`, { headers: { ...getHeaders(), 'Content-Type': 'application/json' }, credentials: 'include', ...opts });
-}
 
 // ── Reusable UI ──
 function Card({ children, className = '' }) {
@@ -320,86 +313,90 @@ function ImagesTab() {
   const slideFileRef = useRef(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  const load = () => {
-    api('/api/site-images')
-      .then(r => r.json())
-      .then(data => {
-        const imgMap = {};
-        const fMap = {};
-        (data.slots || []).forEach(s => {
-          if (s.url) imgMap[s.id] = `${API_URL}${s.url}`;
-          fMap[s.id] = { x: s.focus_x ?? 50, y: s.focus_y ?? 50 };
-        });
-        setCustomImages(imgMap);
-        setFocusVals(fMap);
-      })
-      .catch(() => {});
+  const load = async () => {
+    try {
+      const data = await db.getSiteImages();
+      const imgMap = {};
+      const fMap = {};
+      (data.slots || []).forEach(s => {
+        if (s.url) imgMap[s.id] = s.url;
+        fMap[s.id] = { x: s.focus_x ?? 50, y: s.focus_y ?? 50 };
+      });
+      setCustomImages(imgMap);
+      setFocusVals(fMap);
+    } catch (err) { toast.error(err.message); }
   };
   useEffect(() => { load(); }, []);
 
-  const loadSlides = () => {
-    api('/api/arrangement-slides')
-      .then(r => r.json())
-      .then(data => setSlides(Array.isArray(data) ? data.sort((a, b) => a.sort_order - b.sort_order) : []))
-      .catch(() => {});
+  const loadSlides = async () => {
+    try {
+      const data = await db.getSlides();
+      setSlides(Array.isArray(data) ? data : []);
+    } catch (err) { toast.error(err.message); }
   };
   useEffect(() => { loadSlides(); }, []);
 
   const uploadSlide = async (file) => {
     setSlideUploading(true);
-    const fd = new FormData();
-    fd.append('file', file);
     try {
-      const res = await fetch(`${API_URL}/api/arrangement-slides/upload`, {
-        method: 'POST', headers: getHeaders(), body: fd, credentials: 'include',
-      });
-      if (res.ok) { toast.success('Bilde lagt til i slideshowet'); loadSlides(); }
-      else { const err = await res.json().catch(() => ({})); toast.error(err.detail || 'Opplasting feilet'); }
-    } catch { toast.error('Nettverksfeil'); }
+      await db.uploadSlide(file);
+      toast.success('Bilde lagt til i slideshowet');
+      loadSlides();
+    } catch (err) { toast.error(err.message); }
     setSlideUploading(false);
     if (slideFileRef.current) slideFileRef.current.value = '';
   };
 
   const deleteSlide = async (id) => {
-    const res = await api(`/api/arrangement-slides/${id}`, { method: 'DELETE' });
-    if (res.ok) { toast.success('Bilde fjernet fra slideshowet'); loadSlides(); }
-    else toast.error('Noe gikk galt');
+    try {
+      await db.deleteSlide(id);
+      toast.success('Bilde fjernet fra slideshowet');
+      loadSlides();
+    } catch (err) { toast.error(err.message); }
   };
 
   const uploadBlob = async (slotId, blob) => {
     setUploading(slotId);
-    const fd = new FormData();
-    fd.append('file', blob, 'image.jpg');
     try {
-      const res = await fetch(`${API_URL}/api/site-images/${slotId}/upload`, {
-        method: 'POST', headers: getHeaders(), body: fd, credentials: 'include',
-      });
-      if (res.ok) {
-        toast.success('Bilde lastet opp');
-        load();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toast.error(err.detail || 'Opplasting feilet');
-      }
-    } catch { toast.error('Nettverksfeil'); }
+      await db.uploadSiteImage(slotId, blob);
+      toast.success('Bilde lastet opp');
+      load();
+    } catch (err) { toast.error(err.message); }
     setUploading(null);
     setCropFile(null);
     const ref = fileRefs.current[slotId];
     if (ref) ref.value = '';
   };
 
-  const saveFocus = async (slotId, x, y) => {
+  // Oppdaterer bare lokal state mens slideren dras; lagring skjer i commitFocus.
+  const setFocusLocal = (slotId, x, y) => {
     setFocusVals(prev => ({ ...prev, [slotId]: { x, y } }));
-    await api(`/api/site-images/${slotId}/focus`, {
-      method: 'PUT',
-      body: JSON.stringify({ focus_x: x, focus_y: y }),
-    }).catch(() => {});
+  };
+
+  const commitFocus = async (slotId) => {
+    const f = focusVals[slotId];
+    if (!f) return;
+    try {
+      await db.setSiteImageFocus(slotId, f.x, f.y);
+    } catch (err) { toast.error(err.message); }
   };
 
   const reset = async (slotId) => {
-    const res = await api(`/api/site-images/${slotId}`, { method: 'DELETE' });
-    if (res.ok) { toast.success('Tilbakestilt til standardbilde'); load(); }
-    else toast.error('Noe gikk galt');
+    try {
+      await db.resetSiteImage(slotId);
+      toast.success('Tilbakestilt til standardbilde');
+      load();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const reorderSlidesHandler = async (reordered) => {
+    setSlides(reordered);
+    try {
+      await db.reorderSlides(reordered.map((s, i) => ({ id: s.id, sort_order: i + 1 })));
+    } catch (err) {
+      toast.error(err.message);
+      loadSlides();
+    }
   };
 
   return (
@@ -487,7 +484,10 @@ function ImagesTab() {
                         <span className="text-xs text-gray-400 w-16 shrink-0">Horisontalt</span>
                         <input
                           type="range" min="0" max="100" value={fx}
-                          onChange={e => saveFocus(slot.id, Number(e.target.value), fy)}
+                          onChange={e => setFocusLocal(slot.id, Number(e.target.value), fy)}
+                          onPointerUp={() => commitFocus(slot.id)}
+                          onKeyUp={() => commitFocus(slot.id)}
+                          onTouchEnd={() => commitFocus(slot.id)}
                           className="flex-1 accent-amber-700"
                         />
                         <span className="text-xs text-gray-400 w-8 text-right shrink-0">{fx}%</span>
@@ -496,7 +496,10 @@ function ImagesTab() {
                         <span className="text-xs text-gray-400 w-16 shrink-0">Vertikalt</span>
                         <input
                           type="range" min="0" max="100" value={fy}
-                          onChange={e => saveFocus(slot.id, fx, Number(e.target.value))}
+                          onChange={e => setFocusLocal(slot.id, fx, Number(e.target.value))}
+                          onPointerUp={() => commitFocus(slot.id)}
+                          onKeyUp={() => commitFocus(slot.id)}
+                          onTouchEnd={() => commitFocus(slot.id)}
                           className="flex-1 accent-amber-700"
                         />
                         <span className="text-xs text-gray-400 w-8 text-right shrink-0">{fy}%</span>
@@ -525,12 +528,7 @@ function ImagesTab() {
               if (!over || active.id === over.id) return;
               const oldIndex = slides.findIndex(s => s.id === active.id);
               const newIndex = slides.findIndex(s => s.id === over.id);
-              const reordered = arrayMove(slides, oldIndex, newIndex);
-              setSlides(reordered);
-              api('/api/arrangement-slides/reorder', {
-                method: 'PUT',
-                body: JSON.stringify({ items: reordered.map((s, i) => ({ id: s.id, sort_order: i + 1 })) }),
-              }).catch(() => {});
+              reorderSlidesHandler(arrayMove(slides, oldIndex, newIndex));
             }}>
             <SortableContext items={slides.map(s => s.id)} strategy={verticalListSortingStrategy}>
               <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
@@ -538,7 +536,7 @@ function ImagesTab() {
                   <SortableItem key={slide.id} id={slide.id}>
                     <Card className="overflow-hidden">
                       <div className="relative h-32 bg-gray-100">
-                        <img src={`${API_URL}${slide.url}`} alt="" className="w-full h-full object-cover" />
+                        <img src={slide.url} alt="" className="w-full h-full object-cover" />
                         <button onClick={() => deleteSlide(slide.id)}
                           className="absolute top-2 right-2 p-1.5 bg-white/90 hover:bg-white text-gray-500 hover:text-red-500 rounded-full shadow transition-colors">
                           <Trash2 className="w-3.5 h-3.5" />
@@ -571,101 +569,9 @@ function ImagesTab() {
 // ════════════════════════════════
 const ALLERGENS = ['Gluten','Melk','Egg','Fisk','Skalldyr','Nøtter','Peanøtter','Soya','Sesamfrø','Sennep','Selleri','Sulfitt','Lupin','Bløtdyr'];
 
-function MenuTab() {
-  const [items, setItems] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [editingId, setEditingId] = useState(null);
-  const [showAdd, setShowAdd] = useState(false);
-  const [showCats, setShowCats] = useState(false);
-  const [newCatName, setNewCatName] = useState('');
-  const [iconPickerOpen, setIconPickerOpen] = useState(null);
-  const [form, setForm] = useState({ category: '', name: '', description: '', price: '', is_available: true, allergens: [] });
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
-
-  const loadItems = () => api('/api/menu').then(r => r.json()).then(d => d?.items && setItems(d.items)).catch(() => {});
-  const loadCats = () => api('/api/menu/categories').then(r => r.json()).then(d => Array.isArray(d) && setCategories(d)).catch(() => {});
-  useEffect(() => { loadItems(); loadCats(); }, []);
-
-  const exportMenu = async () => {
-    try {
-      const r = await api('/api/menu/export');
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `meny-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.success('Meny eksportert');
-    } catch { toast.error('Eksport feilet'); }
-  };
-
-  const importMenu = async (file) => {
-    try {
-      const text = await file.text();
-      const payload = JSON.parse(text);
-      await api('/api/menu/import', { method: 'POST', body: JSON.stringify(payload) });
-      toast.success('Meny importert');
-      loadItems(); loadCats();
-    } catch { toast.error('Import feilet — sjekk at filen er gyldig JSON'); }
-  };
-
-  const catNames = categories.map(c => c.name);
-  const resetForm = () => { setForm({ category: catNames[0] || '', name: '', description: '', price: '', is_available: true, allergens: [] }); setShowAdd(false); setEditingId(null); };
-
-  const addItem = async (e) => {
-    e.preventDefault();
-    const maxOrder = items.filter(i => i.category === form.category).reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
-    await api('/api/menu', { method: 'POST', body: JSON.stringify({ ...form, price: form.price === '' ? null : Number(form.price), sort_order: maxOrder + 1 }) });
-    toast.success('Vare lagt til');
-    resetForm(); loadItems();
-  };
-
-  const updateItem = async (id) => {
-    await api(`/api/menu/${id}`, { method: 'PUT', body: JSON.stringify({ ...form, price: form.price === '' ? null : Number(form.price) }) });
-    toast.success('Vare oppdatert');
-    resetForm(); loadItems();
-  };
-
-  const delItem = async (id) => {
-    await api(`/api/menu/${id}`, { method: 'DELETE' });
-    toast.success('Vare slettet');
-    loadItems();
-  };
-
-  const addCat = async (e) => {
-    e.preventDefault();
-    if (!newCatName.trim()) return;
-    await api('/api/menu/categories', { method: 'POST', body: JSON.stringify({ name: newCatName.trim(), sort_order: categories.length + 1 }) });
-    toast.success(`Kategori "${newCatName}" opprettet`);
-    setNewCatName(''); loadCats();
-  };
-
-  const delCat = async (id, name) => {
-    await api(`/api/menu/categories/${id}`, { method: 'DELETE' });
-    toast.success(`Kategori "${name}" slettet`);
-    loadCats();
-  };
-
-  const updateCatIcon = async (id, iconKey) => {
-    await api(`/api/menu/categories/${id}`, { method: 'PUT', body: JSON.stringify({ icon: iconKey }) });
-    setIconPickerOpen(null);
-    loadCats();
-  };
-
-  const reorderRequest = (url, reorder) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('PUT', `${API_URL}${url}`, true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('admin_token')}`);
-    xhr.withCredentials = true;
-    xhr.send(JSON.stringify({ items: reorder }));
-  };
-
-  const grouped = {};
-  items.forEach(i => { if (!grouped[i.category]) grouped[i.category] = []; grouped[i.category].push(i); });
-
-  const FormFields = () => (
+// Modulnivå-komponent så inputfeltene ikke mister fokus ved hver tastetrykk.
+function MenuFormFields({ form, setForm, catNames }) {
+  return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -716,6 +622,155 @@ function MenuTab() {
       </div>
     </div>
   );
+}
+
+function MenuTab() {
+  const [items, setItems] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [editingId, setEditingId] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [showCats, setShowCats] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [iconPickerOpen, setIconPickerOpen] = useState(null);
+  const [form, setForm] = useState({ category: '', name: '', description: '', price: '', is_available: true, allergens: [] });
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const loadItems = async () => {
+    try { setItems(await db.getMenuItems()); }
+    catch (err) { toast.error(err.message); }
+  };
+  const loadCats = async () => {
+    try { setCategories(await db.getMenuCategories()); }
+    catch (err) { toast.error(err.message); }
+  };
+  useEffect(() => { loadItems(); loadCats(); }, []);
+
+  const exportMenu = async () => {
+    try {
+      const data = await db.exportMenu();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `meny-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Meny eksportert');
+    } catch (err) { toast.error(err.message || 'Eksport feilet'); }
+  };
+
+  const importMenu = async (file) => {
+    let parsed;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      toast.error('Import feilet — sjekk at filen er gyldig JSON');
+      return;
+    }
+    try {
+      await db.importMenu(parsed);
+      toast.success('Meny importert');
+      loadItems(); loadCats();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const catNames = categories.map(c => c.name);
+  const catIdByName = (name) => categories.find(c => c.name === name)?.id;
+  const resetForm = () => { setForm({ category: catNames[0] || '', name: '', description: '', price: '', is_available: true, allergens: [] }); setShowAdd(false); setEditingId(null); };
+
+  const formToPayload = () => {
+    const category_id = catIdByName(form.category);
+    if (!category_id) throw new Error('Velg en kategori');
+    return {
+      category_id,
+      name: form.name,
+      description: form.description,
+      price: form.price === '' ? null : Number(form.price),
+      is_available: form.is_available,
+      allergens: form.allergens || [],
+    };
+  };
+
+  const addItem = async (e) => {
+    e.preventDefault();
+    try {
+      const maxOrder = items.filter(i => i.category === form.category).reduce((m, i) => Math.max(m, i.sort_order || 0), 0);
+      await db.createMenuItem({ ...formToPayload(), sort_order: maxOrder + 1 });
+      toast.success('Vare lagt til');
+      resetForm(); loadItems();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const updateItem = async (id) => {
+    try {
+      await db.updateMenuItem(id, formToPayload());
+      toast.success('Vare oppdatert');
+      resetForm(); loadItems();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const delItem = async (id) => {
+    try {
+      await db.deleteMenuItem(id);
+      toast.success('Vare slettet');
+      loadItems();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const addCat = async (e) => {
+    e.preventDefault();
+    if (!newCatName.trim()) return;
+    try {
+      await db.createMenuCategory({ name: newCatName.trim(), sort_order: categories.length + 1 });
+      toast.success(`Kategori "${newCatName}" opprettet`);
+      setNewCatName(''); loadCats();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const delCat = async (id, name) => {
+    try {
+      await db.deleteMenuCategory(id);
+      toast.success(`Kategori "${name}" slettet`);
+      loadCats();
+    } catch (err) {
+      // Kategorien har fortsatt varer (eller annen feil) — behold den i listen.
+      toast.error(err.message);
+    }
+  };
+
+  const updateCatIcon = async (id, iconKey) => {
+    try {
+      await db.updateMenuCategory(id, { icon: iconKey });
+      setIconPickerOpen(null);
+      loadCats();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const reorderCats = async (newCats) => {
+    setCategories(newCats);
+    try {
+      await db.reorderMenuCategories(newCats.map((c, i) => ({ id: c.id, sort_order: i + 1 })));
+    } catch (err) {
+      toast.error(err.message);
+      loadCats();
+    }
+  };
+
+  const reorderItemsInCat = async (cat, reordered) => {
+    setItems(prev => {
+      const rest = prev.filter(i => i.category !== cat);
+      return [...rest, ...reordered.map((item, idx) => ({ ...item, sort_order: idx + 1 }))];
+    });
+    try {
+      await db.reorderMenuItems(reordered.map((item, i) => ({ id: item.id, sort_order: i + 1 })));
+    } catch (err) {
+      toast.error(err.message);
+      loadItems();
+    }
+  };
+
+  const grouped = {};
+  items.forEach(i => { if (!grouped[i.category]) grouped[i.category] = []; grouped[i.category].push(i); });
 
   return (
     <div>
@@ -755,9 +810,7 @@ function MenuTab() {
               if (!over || active.id === over.id) return;
               const oi = categories.findIndex(c => c.id === active.id);
               const ni = categories.findIndex(c => c.id === over.id);
-              const newCats = arrayMove(categories, oi, ni);
-              setCategories(newCats);
-              reorderRequest('/api/menu/categories/reorder', newCats.map((c, i) => ({ id: c.id, sort_order: i + 1 })));
+              reorderCats(arrayMove(categories, oi, ni));
             }}>
             <SortableContext items={categories.map(c => c.id)} strategy={verticalListSortingStrategy}>
               <div className="space-y-1.5 mb-4">
@@ -821,7 +874,7 @@ function MenuTab() {
             <button onClick={resetForm}><X className="w-4 h-4 text-gray-400 hover:text-gray-600" /></button>
           </div>
           <form onSubmit={addItem} className="space-y-4">
-            <FormFields />
+            <MenuFormFields form={form} setForm={setForm} catNames={catNames} />
             <div className="flex gap-2 pt-1">
               <button type="submit" data-testid="menu-form-submit"
                 className="flex items-center gap-1.5 px-5 py-2.5 bg-amber-700 hover:bg-amber-800 text-white text-sm font-semibold rounded-xl transition-colors">
@@ -856,12 +909,7 @@ function MenuTab() {
                   if (!over || active.id === over.id) return;
                   const oi = catItems.findIndex(i => i.id === active.id);
                   const ni = catItems.findIndex(i => i.id === over.id);
-                  const reordered = arrayMove(catItems, oi, ni);
-                  setItems(prev => {
-                    const rest = prev.filter(i => i.category !== cat);
-                    return [...rest, ...reordered.map((item, idx) => ({ ...item, sort_order: idx + 1 }))];
-                  });
-                  reorderRequest('/api/menu/reorder', reordered.map((item, i) => ({ id: item.id, sort_order: i + 1 })));
+                  reorderItemsInCat(cat, arrayMove(catItems, oi, ni));
                 }}>
                 <SortableContext items={catItems.map(i => i.id)} strategy={verticalListSortingStrategy}>
                   {catItems.map((item, idx) => (
@@ -870,7 +918,7 @@ function MenuTab() {
                         {editingId === item.id ? (
                           <div className="p-4 bg-amber-50/50">
                             <form onSubmit={e => { e.preventDefault(); updateItem(item.id); }} className="space-y-3">
-                              <FormFields />
+                              <MenuFormFields form={form} setForm={setForm} catNames={catNames} />
                               <div className="flex gap-2">
                                 <button type="submit"
                                   className="flex items-center gap-1.5 px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white text-sm font-semibold rounded-xl transition-colors">
@@ -929,14 +977,21 @@ function OpeningHoursTab() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api('/api/opening-hours').then(r => r.json()).then(d => d?.schedule && setData(d)).catch(() => {});
+    db.getOpeningHours()
+      .then(d => {
+        if (d?.schedule) setData(d);
+        else toast.error('Fant ingen åpningstider');
+      })
+      .catch(err => toast.error(err.message));
   }, []);
 
   const save = async () => {
     setSaving(true);
-    await api('/api/opening-hours', { method: 'PUT', body: JSON.stringify(data) });
+    try {
+      await db.saveOpeningHours(data);
+      toast.success('Åpningstider lagret');
+    } catch (err) { toast.error(err.message); }
     setSaving(false);
-    toast.success('Åpningstider lagret');
   };
 
   if (!data) return <div className="py-12 text-center text-gray-400">Laster...</div>;
@@ -1007,7 +1062,7 @@ function OpeningHoursTab() {
 function UsersTab() {
   const [users, setUsers] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ username: '', password: '', name: '', role: 'admin' });
+  const [form, setForm] = useState({ username: '', password: '', name: '' });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -1015,7 +1070,10 @@ function UsersTab() {
   const [editError, setEditError] = useState('');
   const { user: currentUser } = useAuth();
 
-  const load = () => api('/api/users').then(r => r.json()).then(d => Array.isArray(d) && setUsers(d)).catch(() => {});
+  const load = async () => {
+    try { setUsers(await db.listUsers()); }
+    catch (err) { toast.error(err.message); }
+  };
   useEffect(() => { load(); }, []);
 
   const addUser = async (e) => {
@@ -1023,27 +1081,24 @@ function UsersTab() {
     setError('');
     setSaving(true);
     try {
-      const res = await api('/api/users', { method: 'POST', body: JSON.stringify(form) });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        setError(d.detail || 'Kunne ikke opprette bruker');
-        return;
-      }
+      await db.createUser({ username: form.username, password: form.password, name: form.name });
       toast.success(`Bruker "${form.username}" opprettet`);
-      setForm({ username: '', password: '', name: '', role: 'admin' });
+      setForm({ username: '', password: '', name: '' });
       setShowAdd(false);
       load();
-    } catch {
-      setError('Nettverksfeil — kunne ikke nå serveren');
+    } catch (err) {
+      setError(err.message || 'Kunne ikke opprette bruker');
     } finally {
       setSaving(false);
     }
   };
 
   const delUser = async (id) => {
-    await api(`/api/users/${id}`, { method: 'DELETE' });
-    toast.success('Bruker slettet');
-    load();
+    try {
+      await db.deleteUser(id);
+      toast.success('Bruker slettet');
+      load();
+    } catch (err) { toast.error(err.message); }
   };
 
   const startEditUser = (u) => {
@@ -1060,17 +1115,12 @@ function UsersTab() {
     try {
       const body = { username: editForm.username, name: editForm.name };
       if (editForm.password) body.password = editForm.password;
-      const res = await api(`/api/users/${editingId}`, { method: 'PATCH', body: JSON.stringify(body) });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        setEditError(d.detail || 'Kunne ikke oppdatere bruker');
-        return;
-      }
+      await db.updateUser(editingId, body);
       toast.success('Bruker oppdatert');
       setEditingId(null);
       load();
-    } catch {
-      setEditError('Nettverksfeil — kunne ikke nå serveren');
+    } catch (err) {
+      setEditError(err.message || 'Kunne ikke oppdatere bruker');
     } finally {
       setSaving(false);
     }
@@ -1130,7 +1180,7 @@ function UsersTab() {
       <div className="space-y-3">
         {users.map(u => {
           const isSelf = u.id === currentUser?.id;
-          const isProtectedAdmin = u.username === 'admin';
+          const isProtectedAdmin = !!u.is_owner;
           const canModify = !isProtectedAdmin || isSelf;
           const isEditing = editingId === u.id;
 
@@ -1187,6 +1237,7 @@ function UsersTab() {
                     <div className="flex items-center gap-2">
                       <p className="font-semibold text-gray-900 text-sm">{u.username}</p>
                       <Badge color="amber">{u.role}</Badge>
+                      {u.is_owner && <Badge color="blue">hovedadmin</Badge>}
                       {isSelf && <Badge color="green">deg</Badge>}
                     </div>
                     {u.name && <p className="text-xs text-gray-400">{u.name}</p>}
@@ -1220,8 +1271,7 @@ function ActivityLogTab() {
 
   const load = () => {
     setLoading(true);
-    api('/api/activity-log')
-      .then(r => r.ok ? r.json() : [])
+    db.getActivityLog()
       .then(data => setLogs(Array.isArray(data) ? data : []))
       .catch(() => setLogs([]))
       .finally(() => setLoading(false));
@@ -1315,30 +1365,9 @@ const TEXT_DEFAULTS = {
   arr_contact_desc:  'Har dere et arrangement i tankene? Ta kontakt — så finner vi ut av det sammen. Vi svarer raskt og hjelper gjerne med alt fra meny til praktiske detaljer.',
 };
 
-function TextTab() {
-  const [texts, setTexts] = useState({ ...TEXT_DEFAULTS });
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    api('/api/site-text')
-      .then(r => r.ok ? r.json() : {})
-      .then(data => { if (data && Object.keys(data).length) setTexts(prev => ({ ...prev, ...data })); })
-      .catch(() => {});
-  }, []);
-
-  const set = (key, value) => setTexts(prev => ({ ...prev, [key]: value }));
-
-  const saveAll = async () => {
-    setSaving(true);
-    try {
-      const r = await api('/api/site-text', { method: 'PUT', body: JSON.stringify({ texts }) });
-      if (r.ok) { invalidateSiteTextCache(); toast.success('Tekster lagret'); }
-      else toast.error('Lagring feilet');
-    } catch { toast.error('Nettverksfeil'); }
-    setSaving(false);
-  };
-
-  const Field = ({ label, textKey, multiline = false, rows = 3 }) => (
+// Modulnivå-komponent så inputfeltene ikke mister fokus ved hver tastetrykk.
+function TextField({ label, textKey, texts, set, multiline = false, rows = 3 }) {
+  return (
     <div>
       <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
       {multiline ? (
@@ -1350,6 +1379,29 @@ function TextTab() {
       )}
     </div>
   );
+}
+
+function TextTab() {
+  const [texts, setTexts] = useState({ ...TEXT_DEFAULTS });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    db.getSiteText()
+      .then(data => { if (data && Object.keys(data).length) setTexts(prev => ({ ...prev, ...data })); })
+      .catch(err => toast.error(err.message));
+  }, []);
+
+  const set = (key, value) => setTexts(prev => ({ ...prev, [key]: value }));
+
+  const saveAll = async () => {
+    setSaving(true);
+    try {
+      await db.saveSiteText(texts);
+      invalidateSiteTextCache();
+      toast.success('Tekster lagret');
+    } catch (err) { toast.error(err.message); }
+    setSaving(false);
+  };
 
   return (
     <div>
@@ -1370,8 +1422,8 @@ function TextTab() {
         <Card className="p-5">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Forsiden</p>
           <div className="space-y-3">
-            <Field label="Undertittel (under logoet)" textKey="hero_subheading" />
-            <Field label="Beskrivelse" textKey="hero_description" />
+            <TextField texts={texts} set={set}label="Undertittel (under logoet)" textKey="hero_subheading" />
+            <TextField texts={texts} set={set}label="Beskrivelse" textKey="hero_description" />
           </div>
         </Card>
 
@@ -1379,17 +1431,17 @@ function TextTab() {
         <Card className="p-5">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Om oss</p>
           <div className="space-y-3">
-            <Field label="Overskrift" textKey="about_title" />
-            <Field label="Avsnitt 1" textKey="about_p0" multiline rows={4} />
-            <Field label="Avsnitt 2" textKey="about_p1" multiline rows={4} />
-            <Field label="Avsnitt 3" textKey="about_p2" multiline rows={4} />
+            <TextField texts={texts} set={set}label="Overskrift" textKey="about_title" />
+            <TextField texts={texts} set={set}label="Avsnitt 1" textKey="about_p0" multiline rows={4} />
+            <TextField texts={texts} set={set}label="Avsnitt 2" textKey="about_p1" multiline rows={4} />
+            <TextField texts={texts} set={set}label="Avsnitt 3" textKey="about_p2" multiline rows={4} />
             <div className="pt-1">
               <p className="text-xs font-semibold text-gray-400 mb-3">Høydepunktkort (4 stk)</p>
               <div className="grid sm:grid-cols-2 gap-3">
                 {[0, 1, 2, 3].map(i => (
                   <div key={i} className="bg-gray-50 rounded-xl p-3 space-y-2">
-                    <Field label={`Kort ${i + 1} — tittel`} textKey={`about_feat_${i}_title`} />
-                    <Field label="Tekst" textKey={`about_feat_${i}_desc`} />
+                    <TextField texts={texts} set={set}label={`Kort ${i + 1} — tittel`} textKey={`about_feat_${i}_title`} />
+                    <TextField texts={texts} set={set}label="Tekst" textKey={`about_feat_${i}_desc`} />
                   </div>
                 ))}
               </div>
@@ -1402,16 +1454,16 @@ function TextTab() {
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Aktiviteter & Fasiliteter</p>
           <div className="space-y-3">
             <div className="grid sm:grid-cols-2 gap-3">
-              <Field label="Overskrift" textKey="act_title" />
-              <Field label="Undertittel" textKey="act_subtitle" />
+              <TextField texts={texts} set={set}label="Overskrift" textKey="act_title" />
+              <TextField texts={texts} set={set}label="Undertittel" textKey="act_subtitle" />
             </div>
             <div className="pt-1">
               <p className="text-xs font-semibold text-gray-400 mb-3">Aktivitetskort (6 stk)</p>
               <div className="grid sm:grid-cols-2 gap-3">
                 {[0, 1, 2, 3, 4, 5].map(i => (
                   <div key={i} className="bg-gray-50 rounded-xl p-3 space-y-2">
-                    <Field label={`Kort ${i + 1} — tittel`} textKey={`act_${i}_title`} />
-                    <Field label="Tekst" textKey={`act_${i}_desc`} />
+                    <TextField texts={texts} set={set}label={`Kort ${i + 1} — tittel`} textKey={`act_${i}_title`} />
+                    <TextField texts={texts} set={set}label="Tekst" textKey={`act_${i}_desc`} />
                   </div>
                 ))}
               </div>
@@ -1424,11 +1476,11 @@ function TextTab() {
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Kontaktinfo</p>
           <div className="space-y-3">
             <div className="grid sm:grid-cols-2 gap-3">
-              <Field label="Telefon (visning, f.eks. 944 78 021)" textKey="contact_phone" />
-              <Field label="Telefon (ring-lenke, kun siffer, f.eks. 94478021)" textKey="contact_phone_raw" />
+              <TextField texts={texts} set={set}label="Telefon (visning, f.eks. 944 78 021)" textKey="contact_phone" />
+              <TextField texts={texts} set={set}label="Telefon (ring-lenke, kun siffer, f.eks. 94478021)" textKey="contact_phone_raw" />
             </div>
-            <Field label="E-postadresse" textKey="contact_email" />
-            <Field label="Facebook-lenke" textKey="contact_facebook" />
+            <TextField texts={texts} set={set}label="E-postadresse" textKey="contact_email" />
+            <TextField texts={texts} set={set}label="Facebook-lenke" textKey="contact_facebook" />
           </div>
         </Card>
 
@@ -1437,51 +1489,51 @@ function TextTab() {
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Arrangement</p>
           <div className="space-y-3">
             <p className="text-xs font-semibold text-gray-400 mb-1">Hero</p>
-            <Field label="Liten tekst over tittel" textKey="arr_hero_eyebrow" />
-            <Field label="Tittel" textKey="arr_hero_title" />
-            <Field label="Undertekst" textKey="arr_hero_subtitle" multiline />
+            <TextField texts={texts} set={set}label="Liten tekst over tittel" textKey="arr_hero_eyebrow" />
+            <TextField texts={texts} set={set}label="Tittel" textKey="arr_hero_title" />
+            <TextField texts={texts} set={set}label="Undertekst" textKey="arr_hero_subtitle" multiline />
 
             <div className="pt-2">
               <div className="grid sm:grid-cols-2 gap-3 mb-3">
-                <Field label="Overskrift — anledninger" textKey="arr_events_title" />
-                <Field label="Undertittel — anledninger" textKey="arr_events_subtitle" />
+                <TextField texts={texts} set={set}label="Overskrift — anledninger" textKey="arr_events_title" />
+                <TextField texts={texts} set={set}label="Undertittel — anledninger" textKey="arr_events_subtitle" />
               </div>
               <p className="text-xs font-semibold text-gray-400 mb-3">Arrangementtyper (6 stk)</p>
               <div className="grid sm:grid-cols-2 gap-3">
                 {[0, 1, 2, 3, 4, 5].map(i => (
                   <div key={i} className="bg-gray-50 rounded-xl p-3 space-y-2">
-                    <Field label={`Kort ${i + 1} — tittel`} textKey={`arr_event_${i}_title`} />
-                    <Field label="Tekst" textKey={`arr_event_${i}_desc`} />
+                    <TextField texts={texts} set={set}label={`Kort ${i + 1} — tittel`} textKey={`arr_event_${i}_title`} />
+                    <TextField texts={texts} set={set}label="Tekst" textKey={`arr_event_${i}_desc`} />
                   </div>
                 ))}
               </div>
             </div>
 
             <div className="pt-2">
-              <Field label="Overskrift — hva vi tilbyr" textKey="arr_offer_title" />
+              <TextField texts={texts} set={set}label="Overskrift — hva vi tilbyr" textKey="arr_offer_title" />
               <div className="pt-2">
-                <Field label="Innledning" textKey="arr_offer_intro" multiline />
+                <TextField texts={texts} set={set}label="Innledning" textKey="arr_offer_intro" multiline />
               </div>
               <p className="text-xs font-semibold text-gray-400 mb-3 mt-3">Tilbudspunkter (6 stk)</p>
               <div className="grid sm:grid-cols-2 gap-3">
                 {[0, 1, 2, 3, 4, 5].map(i => (
-                  <Field key={i} label={`Punkt ${i + 1}`} textKey={`arr_offer_${i}`} />
+                  <TextField texts={texts} set={set}key={i} label={`Punkt ${i + 1}`} textKey={`arr_offer_${i}`} />
                 ))}
               </div>
               <div className="grid sm:grid-cols-2 gap-3 pt-3">
-                <Field label="Badge — tittel (f.eks. «Gjenåpnet 2026»)" textKey="arr_badge_title" />
-                <Field label="Badge — undertekst" textKey="arr_badge_sub" />
+                <TextField texts={texts} set={set}label="Badge — tittel (f.eks. «Gjenåpnet 2026»)" textKey="arr_badge_title" />
+                <TextField texts={texts} set={set}label="Badge — undertekst" textKey="arr_badge_sub" />
               </div>
             </div>
 
             <div className="pt-2">
-              <Field label="Overskrift — galleri" textKey="arr_gallery_title" />
+              <TextField texts={texts} set={set}label="Overskrift — galleri" textKey="arr_gallery_title" />
             </div>
 
             <div className="pt-2">
-              <Field label="Overskrift — kontakt-CTA" textKey="arr_contact_title" />
+              <TextField texts={texts} set={set}label="Overskrift — kontakt-CTA" textKey="arr_contact_title" />
               <div className="pt-2">
-                <Field label="Beskrivelse — kontakt-CTA" textKey="arr_contact_desc" multiline />
+                <TextField texts={texts} set={set}label="Beskrivelse — kontakt-CTA" textKey="arr_contact_desc" multiline />
               </div>
             </div>
           </div>
@@ -1503,7 +1555,7 @@ function Sidebar({ tab, setTab, user, logout, navigate, mobileOpen, setMobileOpe
     { id: 'text',      label: 'Tekst',       Icon: Type            },
     { id: 'hours',     label: 'Åpningstider',Icon: Clock           },
     { id: 'users',     label: 'Brukere',     Icon: Users           },
-    ...(user?.username === 'admin' ? [{ id: 'log', label: 'Logg', Icon: History }] : []),
+    ...(user?.is_owner ? [{ id: 'log', label: 'Logg', Icon: History }] : []),
   ];
 
   const SidebarContent = ({ onSelect }) => (
@@ -1609,10 +1661,10 @@ function BlogTab() {
 
   const load = () => {
     setLoading(true);
-    api('/api/blog?include_drafts=true')
-      .then(r => r.ok ? r.json() : [])
-      .then(data => { setPosts(Array.isArray(data) ? data : []); setLoading(false); })
-      .catch(() => setLoading(false));
+    db.getPosts()
+      .then(data => setPosts(Array.isArray(data) ? data : []))
+      .catch(err => toast.error(err.message))
+      .finally(() => setLoading(false));
   };
 
   useEffect(load, []);
@@ -1631,14 +1683,7 @@ function BlogTab() {
 
   const uploadImage = async (postId) => {
     if (!imgFile) return;
-    const fd = new FormData();
-    fd.append('file', imgFile);
-    await fetch(`${API_URL}/api/blog/${postId}/image`, {
-      method: 'POST',
-      headers: getHeaders(),
-      credentials: 'include',
-      body: fd,
-    });
+    await db.uploadPostImage(postId, imgFile);
   };
 
   const save = async () => {
@@ -1647,35 +1692,36 @@ function BlogTab() {
     try {
       let postId;
       if (editing === 'new') {
-        const r = await api('/api/blog', { method: 'POST', body: JSON.stringify(form) });
-        if (!r.ok) throw new Error();
-        const created = await r.json();
+        const created = await db.createPost(form);
         postId = created.id;
       } else {
-        const r = await api(`/api/blog/${editing.id}`, { method: 'PUT', body: JSON.stringify(form) });
-        if (!r.ok) throw new Error();
+        await db.updatePost(editing.id, form);
         postId = editing.id;
       }
       await uploadImage(postId);
       toast.success(editing === 'new' ? 'Innlegg opprettet' : 'Innlegg oppdatert');
       setEditing(null);
       load();
-    } catch {
-      toast.error('Noe gikk galt');
+    } catch (err) {
+      toast.error(err.message || 'Noe gikk galt');
     } finally {
       setSaving(false);
     }
   };
 
   const togglePublish = async (post) => {
-    await api(`/api/blog/${post.id}`, { method: 'PUT', body: JSON.stringify({ is_published: !post.is_published }) });
-    load();
+    try {
+      await db.updatePost(post.id, { is_published: !post.is_published });
+      load();
+    } catch (err) { toast.error(err.message); }
   };
 
   const deletePost = async (postId) => {
-    await api(`/api/blog/${postId}`, { method: 'DELETE' });
-    toast.success('Innlegg slettet');
-    load();
+    try {
+      await db.deletePost(postId);
+      toast.success('Innlegg slettet');
+      load();
+    } catch (err) { toast.error(err.message); }
   };
 
   const formatDate = (iso) => new Date(iso).toLocaleDateString('nb-NO', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -1683,7 +1729,7 @@ function BlogTab() {
   // Build preview image URL: local file > existing upload > none
   const previewImgUrl = imgFile
     ? URL.createObjectURL(imgFile)
-    : (editing !== 'new' && editing?.image_url ? `${API_URL}${editing.image_url}` : null);
+    : (editing !== 'new' && editing?.image_url ? editing.image_url : null);
 
   const previewBody = form.body
     ? (form.body.length > 300 ? form.body.slice(0, 300).trimEnd() + '…' : form.body)
@@ -1851,7 +1897,7 @@ function BlogTab() {
             <Card key={post.id} className="p-4 flex items-start gap-4">
               {post.image_url && (
                 <img
-                  src={`${API_URL}${post.image_url}`}
+                  src={post.image_url}
                   alt=""
                   className="w-16 h-16 object-cover rounded-xl flex-shrink-0"
                 />

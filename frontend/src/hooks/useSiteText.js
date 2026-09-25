@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import { getSiteText } from '../lib/db';
 
 let _cache = null;
 let _promise = null;
@@ -11,11 +10,13 @@ export function useSiteText() {
   useEffect(() => {
     if (_cache) { setTextMap(_cache); return; }
     if (!_promise) {
-      _promise = fetch(`${API_URL}/api/site-text`)
-        .then(r => r.ok ? r.json() : {})
+      _promise = getSiteText()
+        .then(data => data || {})
         .catch(() => ({}));
     }
-    _promise.then(data => { _cache = data; setTextMap(data); });
+    let cancelled = false;
+    _promise.then(data => { _cache = data; if (!cancelled) setTextMap(data); });
+    return () => { cancelled = true; };
   }, []);
 
   const t = (key, fallback = '') => textMap[key] ?? fallback;
