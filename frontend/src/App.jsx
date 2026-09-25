@@ -18,6 +18,8 @@ import MenuPage from './pages/MenuPage';
 import ArrangementPage from './pages/ArrangementPage';
 import BlogPage from './pages/BlogPage';
 import NotFound from './pages/NotFound';
+import ComingSoon from './pages/ComingSoon';
+import { PREVIEW_GATE_ENABLED, isSiteUnlocked } from './lib/preview';
 import { Coffee, ArrowRight, Wheat, Soup, Leaf } from 'lucide-react';
 
 // ── Progress bar — mounts fresh on each navigation ──
@@ -124,6 +126,10 @@ function AppRoutes() {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [location.pathname]);
+
+  // Admin-sidene er alltid åpne, resten vises bare med forhåndsvisningskode.
+  const gated = PREVIEW_GATE_ENABLED && !isSiteUnlocked() && !location.pathname.startsWith('/admin');
+  if (gated) return <ComingSoon />;
 
   return (
     <>
