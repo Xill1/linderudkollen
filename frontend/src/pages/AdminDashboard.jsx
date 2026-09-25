@@ -1335,8 +1335,8 @@ const TEXT_DEFAULTS = {
   act_3_title: 'Familievennlig',        act_3_desc: 'Barnekrok og barsel-sone — vi tar godt imot de minste og nybakte foreldre',
   act_4_title: 'Glutenfrie alternativer', act_4_desc: 'Vi tilbyr glutenfrie alternativer på mye av menyen — spør oss gjerne!',
   act_5_title: 'Uteområde',             act_5_desc: 'Hent maten inne og nyt den i sola på våre fine uteområder — perfekt etter en tur i marka',
-  contact_phone:     '944 78 021',
-  contact_phone_raw: '94478021',
+  contact_phone:     '915 72 083',
+  contact_phone_raw: '91572083',
   contact_email:     'mmercellova@gmail.com',
   contact_facebook:  'https://www.facebook.com/profile.php?id=100057194900966',
   arr_hero_eyebrow: 'Linderudkollen Sportsstue',
@@ -1476,8 +1476,8 @@ function TextTab() {
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Kontaktinfo</p>
           <div className="space-y-3">
             <div className="grid sm:grid-cols-2 gap-3">
-              <TextField texts={texts} set={set}label="Telefon (visning, f.eks. 944 78 021)" textKey="contact_phone" />
-              <TextField texts={texts} set={set}label="Telefon (ring-lenke, kun siffer, f.eks. 94478021)" textKey="contact_phone_raw" />
+              <TextField texts={texts} set={set}label="Telefon (visning, f.eks. 915 72 083)" textKey="contact_phone" />
+              <TextField texts={texts} set={set}label="Telefon (ring-lenke, kun siffer, f.eks. 91572083)" textKey="contact_phone_raw" />
             </div>
             <TextField texts={texts} set={set}label="E-postadresse" textKey="contact_email" />
             <TextField texts={texts} set={set}label="Facebook-lenke" textKey="contact_facebook" />

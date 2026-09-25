@@ -28,12 +28,12 @@ insert into public.opening_hours (id, period, schedule, notices, footer_note) va
   '16.02.2026 — 21.06.2026',
   '[
     {"day":"Mandag","hours":"Stengt","closed":true},
-    {"day":"Tirsdag","hours":"10:00 — 20:00","closed":false},
+    {"day":"Tirsdag","hours":"10:00 — 18:00","closed":false},
     {"day":"Onsdag","hours":"10:00 — 20:00","closed":false},
-    {"day":"Torsdag","hours":"10:00 — 20:00","closed":false},
-    {"day":"Fredag","hours":"10:00 — 20:00","closed":false},
-    {"day":"Lørdag","hours":"10:00 — 16:00","closed":false},
-    {"day":"Søndag","hours":"10:00 — 16:00","closed":false}
+    {"day":"Torsdag","hours":"10:00 — 18:00","closed":false},
+    {"day":"Fredag","hours":"10:00 — 18:00","closed":false},
+    {"day":"Lørdag","hours":"10:00 — 18:00","closed":false},
+    {"day":"Søndag","hours":"10:00 — 18:00","closed":false}
   ]'::jsonb,
   '["For oppdaterte åpningstider, sjekk vår Facebook-side","Kveldsåpent tirsdag til fredag med utvidede tider","Helårsvei med stor parkeringsplass"]'::jsonb,
   'Sjekk Facebook for eventuelle endringer i åpningstider'

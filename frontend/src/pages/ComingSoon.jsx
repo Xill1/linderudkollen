@@ -20,7 +20,7 @@ export default function ComingSoon() {
       <header className="relative overflow-hidden bg-amber-950 text-white">
         <div className="absolute inset-0 bg-cover bg-center opacity-30" style={{ backgroundImage: "url('/hero.jpg')" }} />
         <div className="relative max-w-3xl mx-auto px-6 py-20 text-center">
-          <img src="/logo.png" alt="Linderudkollen Sportsstue" className="h-32 md:h-40 w-auto mx-auto mb-6 drop-shadow-2xl" />
+          <img src="/logo.png" alt="Linderudkollen Sportsstue" className="h-32 md:h-40 w-auto mx-auto mb-6 drop-shadow-2xl" style={{ filter: 'brightness(0) invert(1)' }} />
           <p className="text-amber-200 text-sm font-semibold uppercase tracking-[0.2em] mb-3">Sportsstue i Lillomarka</p>
           <h1 className="text-3xl md:text-5xl font-bold mb-4 leading-tight" style={{ fontFamily: "'Playfair Display', serif", textWrap: 'balance' }}>
             Nettsiden er snart ferdig
